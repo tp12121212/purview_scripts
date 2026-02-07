@@ -33,7 +33,7 @@ param(
 
 function Get-RulepackIdentity {
     param([object]$Rulepack)
-    foreach ($prop in @("Identity", "Id", "Name", "DisplayName")) {
+    foreach ($prop in @("Identity", "Id", "Name", "DisplayName", "RulePackageId", "RulePackageID", "PackageId", "PackageID")) {
         if ($Rulepack.PSObject.Properties.Name -contains $prop) {
             $value = $Rulepack.$prop
             if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -46,7 +46,7 @@ function Get-RulepackIdentity {
 
 function Get-RulepackName {
     param([object]$Rulepack)
-    foreach ($prop in @("LocalizedName", "Localized Name", "Name", "DisplayName", "Identity", "Id")) {
+    foreach ($prop in @("LocalizedName", "Localized Name", "Name", "DisplayName", "Identity", "Id", "RulePackageName")) {
         $property = $Rulepack.PSObject.Properties[$prop]
         if ($property) {
             $value = $property.Value
@@ -101,6 +101,11 @@ try {
     }
     $selectedName = Get-RulepackName $selected
     $selectedIdentity = Get-RulepackIdentity $selected
+    if ([string]::IsNullOrWhiteSpace($selectedIdentity)) {
+        $selectedIdentity = $selectedName
+    }
+    Write-Verbose ("Selected rulepack name: {0}" -f $selectedName)
+    Write-Verbose ("Selected rulepack identity: {0}" -f $selectedIdentity)
 
     if (-not (Test-Path -LiteralPath $OutputDirectory)) {
         throw "OutputDirectory not found: $OutputDirectory"
@@ -108,6 +113,8 @@ try {
 
     $exported = Get-DlpSensitiveInformationTypeRulePackage -Identity $selectedIdentity -ErrorAction Stop
     $exportedName = Get-RulepackName $exported
+    Write-Verbose ("Exported object type: {0}" -f $exported.GetType().FullName)
+    Write-Verbose ("Exported properties: {0}" -f ($exported.PSObject.Properties.Name -join ", "))
 
     $nameForFile = if (-not [string]::IsNullOrWhiteSpace($exportedName)) { $exportedName } else { $selectedName }
     $safeName = ($nameForFile -replace '[^\w\-. ]', '_').Trim()
@@ -119,11 +126,15 @@ try {
     $xmlContent = $null
     $rawBytes = $null
 
-    foreach ($prop in @("RulePackage", "RulePackageXML", "RulePackageXml", "Xml", "XML", "FileData", "Data", "Content")) {
+    foreach ($prop in @("RulePackage", "RulePackageXML", "RulePackageXml", "Xml", "XML", "FileData", "Data", "Content", "RulePackageFileData", "FileContent", "Binary")) {
         if ($exported.PSObject.Properties.Name -contains $prop) {
             $value = $exported.$prop
             if ($value -is [byte[]]) {
                 $rawBytes = $value
+                break
+            }
+            if ($value -is [xml] -or $value -is [System.Xml.XmlDocument]) {
+                $xmlContent = $value.OuterXml
                 break
             }
             if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -148,9 +159,49 @@ try {
                 $rawBytes = $prop.Value
                 break
             }
+            if ($prop.Value -is [xml] -or $prop.Value -is [System.Xml.XmlDocument]) {
+                $xmlContent = $prop.Value.OuterXml
+                break
+            }
             if ($prop.Value -is [string] -and $prop.Value.TrimStart().StartsWith("<")) {
                 $xmlContent = $prop.Value
                 break
+            }
+        }
+    }
+
+    if (-not $xmlContent -and -not $rawBytes) {
+        if (Get-Command Export-DlpSensitiveInformationTypeRulePackage -ErrorAction SilentlyContinue) {
+            Write-Verbose "Falling back to Export-DlpSensitiveInformationTypeRulePackage..."
+            $exported = Export-DlpSensitiveInformationTypeRulePackage -Identity $selectedIdentity -ErrorAction Stop
+            Write-Verbose ("Exported (fallback) object type: {0}" -f $exported.GetType().FullName)
+            Write-Verbose ("Exported (fallback) properties: {0}" -f ($exported.PSObject.Properties.Name -join ", "))
+
+            foreach ($prop in @("RulePackage", "RulePackageXML", "RulePackageXml", "Xml", "XML", "FileData", "Data", "Content", "RulePackageFileData", "FileContent", "Binary")) {
+                if ($exported.PSObject.Properties.Name -contains $prop) {
+                    $value = $exported.$prop
+                    if ($value -is [byte[]]) {
+                        $rawBytes = $value
+                        break
+                    }
+                    if ($value -is [xml] -or $value -is [System.Xml.XmlDocument]) {
+                        $xmlContent = $value.OuterXml
+                        break
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($value)) {
+                        $xmlContent = $value
+                        break
+                    }
+                }
+            }
+
+            if (-not $xmlContent -and -not $rawBytes) {
+                if ($exported -is [byte[]]) {
+                    $rawBytes = $exported
+                }
+                elseif ($exported -is [string]) {
+                    $xmlContent = $exported
+                }
             }
         }
     }
