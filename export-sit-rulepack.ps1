@@ -122,7 +122,9 @@ try {
         $safeName = "Rulepack"
     }
 
-    $outputPath = Join-Path -Path $OutputDirectory -ChildPath ($safeName + ".xml")
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmm"
+    $outputFileName = "{0}_{1}.xml" -f $safeName, $timestamp
+    $outputPath = Join-Path -Path $OutputDirectory -ChildPath $outputFileName
     $xmlContent = $null
     $rawBytes = $null
 
